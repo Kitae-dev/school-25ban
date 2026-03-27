@@ -108,11 +108,19 @@ function NoticeAdmin() {
     if (!form.title.trim() || !form.body.trim()) return
     setSaving(true)
     if (editing) {
-      await supabase.from('notices').update({ ...form, updated_at: new Date().toISOString() }).eq('id', editing)
+      const { error } = await supabase
+        .from('notices')
+        .update({ title: form.title, body: form.body, category: form.category, is_pinned: form.is_pinned, updated_at: new Date().toISOString() })
+        .eq('id', editing)
+      if (error) { alert('수정 실패: ' + error.message); setSaving(false); return }
     } else {
-      await supabase.from('notices').insert(form)
+      const { error } = await supabase.from('notices').insert(form)
+      if (error) { alert('등록 실패: ' + error.message); setSaving(false); return }
     }
-    setSaving(false); setShowForm(false); load()
+    setSaving(false)
+    setShowForm(false)
+    setEditing(null)
+    await load()
   }
   const del = async (id) => {
     if (!confirm('공지를 삭제하시겠습니까?')) return

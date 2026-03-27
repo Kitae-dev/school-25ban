@@ -14,6 +14,7 @@ const ADMIN_TABS = [
   { id: 'schedules',  label: '일정',    icon: '📅' },
   { id: 'volunteers', label: '자원봉사', icon: '🙋' },
   { id: 'contacts',   label: '연락처',  icon: '📞' },
+  { id: 'comments',   label: '댓글',    icon: '💬' },
 ]
 
 const CATEGORY_OPTIONS = [
@@ -101,6 +102,7 @@ export default function Admin() {
         {tab === 'schedules'  && <ScheduleAdmin />}
         {tab === 'volunteers' && <VolunteerAdmin />}
         {tab === 'contacts'   && <ContactAdmin />}
+        {tab === 'comments'   && <CommentAdmin />}
       </main>
     </div>
   )
@@ -753,6 +755,167 @@ function Tag({ children }) {
 
 function Spinner() {
   return <div style={{ display: 'flex', justifyContent: 'center', padding: '40px' }}><div className="spinner" /></div>
+}
+
+// ── 댓글 관리 ────────────────────────────────────────────
+function CommentAdmin() {
+  const [notices,  setNotices]  = useState([])
+  const [comments, setComments] = useState([])
+  const [loading,  setLoading]  = useState(true)
+  const [selected, setSelected] = useState(null) // 선택된 notice_id
+  const [deleting, setDeleting] = useState(null) // 삭제 중인 comment id
+
+  // 공지 목록 로드
+  const loadNotices = useCallback(async () => {
+    const { data } = await supabase
+      .from('notices')
+      .select('id, title, created_at')
+      .order('created_at', { ascending: false })
+    setNotices(data || [])
+    setLoading(false)
+  }, [])
+
+  // 선택된 공지의 댓글 로드
+  const loadComments = useCallback(async (noticeId) => {
+    if (!noticeId) { setComments([]); return }
+    const { data, error } = await supabase
+      .from('comments')
+      .select('*')
+      .eq('notice_id', noticeId)
+      .order('created_at', { ascending: true })
+    if (error) console.error('comments load error:', error)
+    setComments(data || [])
+  }, [])
+
+  useEffect(() => { loadNotices() }, [loadNotices])
+  useEffect(() => { loadComments(selected) }, [selected, loadComments])
+
+  const del = async (commentId) => {
+    if (!confirm('이 댓글을 삭제하시겠습니까?')) return
+    setDeleting(commentId)
+    try {
+      await dbDelete('comments', commentId)
+      setComments(prev => prev.filter(c => c.id !== commentId))
+    } catch (e) {
+      alert('삭제 실패: ' + e.message)
+    } finally {
+      setDeleting(null)
+    }
+  }
+
+  const delAll = async (noticeId) => {
+    if (!confirm('이 공지의 모든 댓글을 삭제하시겠습니까?')) return
+    try {
+      const { error } = await supabase.from('comments').delete().eq('notice_id', noticeId)
+      if (error) throw error
+      setComments([])
+    } catch (e) {
+      alert('삭제 실패: ' + e.message)
+    }
+  }
+
+  if (loading) return <Spinner />
+
+  // 댓글 수 집계 (공지별)
+  const countMap = {}
+  // 전체 댓글 수는 별도 쿼리 없이 선택 시 로드 방식 사용
+
+  return (
+    <div>
+      <SectionHeader title="댓글 관리" />
+
+      <div style={{
+        background: '#f0f4fb', borderRadius: '12px', padding: '12px 16px',
+        marginBottom: '16px', fontSize: '13px', color: '#374151', display: 'flex', alignItems: 'center', gap: '8px'
+      }}>
+        <span>ℹ️</span>
+        <span>공지를 선택하면 해당 공지의 댓글을 확인하고 삭제할 수 있습니다</span>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+
+        {/* 왼쪽: 공지 목록 */}
+        <div>
+          <p style={{ fontSize: '11px', fontWeight: 700, color: 'var(--muted)', letterSpacing: '1px', marginBottom: '8px' }}>공지 선택</p>
+          <div style={{ maxHeight: '500px', overflowY: 'auto' }}>
+            {notices.length === 0 ? <Empty /> : notices.map(n => (
+              <button key={n.id} onClick={() => setSelected(n.id)} style={{
+                width: '100%', textAlign: 'left', padding: '10px 12px',
+                border: '1.5px solid', borderRadius: '10px', cursor: 'pointer',
+                marginBottom: '6px', transition: 'all 0.15s', display: 'block',
+                borderColor: selected === n.id ? 'var(--primary)' : 'var(--border)',
+                background:  selected === n.id ? '#f0f4fb' : '#fff',
+              }}>
+                <p style={{ fontSize: '13px', fontWeight: selected === n.id ? 700 : 500, color: selected === n.id ? 'var(--primary)' : 'var(--text)', marginBottom: '3px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {n.title}
+                </p>
+                <p style={{ fontSize: '11px', color: 'var(--muted)' }}>
+                  {new Date(n.created_at).toLocaleDateString('ko-KR')}
+                </p>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* 오른쪽: 댓글 목록 */}
+        <div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+            <p style={{ fontSize: '11px', fontWeight: 700, color: 'var(--muted)', letterSpacing: '1px' }}>
+              댓글 {comments.length > 0 ? `(${comments.length}개)` : ''}
+            </p>
+            {selected && comments.length > 0 && (
+              <button onClick={() => delAll(selected)} style={{
+                fontSize: '11px', fontWeight: 700, color: '#dc2626',
+                background: '#fff5f5', border: '1px solid #fecaca',
+                borderRadius: '6px', padding: '4px 10px', cursor: 'pointer'
+              }}>전체 삭제</button>
+            )}
+          </div>
+
+          {!selected ? (
+            <div style={{ textAlign: 'center', padding: '40px 0', color: 'var(--muted)', fontSize: '13px' }}>
+              ← 왼쪽에서 공지를 선택해 주세요
+            </div>
+          ) : comments.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '40px 0', color: 'var(--muted)', fontSize: '13px' }}>
+              댓글이 없습니다
+            </div>
+          ) : (
+            <div style={{ maxHeight: '500px', overflowY: 'auto' }}>
+              {comments.map(c => (
+                <div key={c.id} style={{
+                  background: '#fff', border: '1px solid var(--border)',
+                  borderRadius: '10px', padding: '11px 13px', marginBottom: '8px',
+                  boxShadow: '0 1px 4px rgba(0,0,0,0.04)',
+                  opacity: deleting === c.id ? 0.5 : 1, transition: 'opacity 0.2s'
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px' }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '5px' }}>
+                        <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--primary)' }}>{c.author_name}</span>
+                        <span style={{ fontSize: '11px', color: 'var(--muted)' }}>
+                          {new Date(c.created_at).toLocaleDateString('ko-KR', { month: 'numeric', day: 'numeric' })}
+                          {' '}
+                          {new Date(c.created_at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                      </div>
+                      <p style={{ fontSize: '13px', color: '#374151', lineHeight: 1.6, wordBreak: 'break-all' }}>{c.body}</p>
+                    </div>
+                    <button onClick={() => del(c.id)} disabled={deleting === c.id} style={{
+                      width: '28px', height: '28px', border: '1px solid #fecaca',
+                      background: '#fff5f5', borderRadius: '8px', fontSize: '13px',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      cursor: 'pointer', flexShrink: 0
+                    }}>🗑️</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
 }
 
 function Empty() {
